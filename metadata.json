@@ -1,0 +1,6 @@
+{
+  "name": "Kairon - Mobile-First Daily Hub PWA",
+  "description": "Personal Manager PWA with quick capture, 3-tier task organizer, and daily micro-habit tracker with streaks.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
