@@ -6,7 +6,10 @@
     --font-mono: 'JetBrains Mono', monospace;
   }
 
-  body {
+  html, body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
     background-color: #07080b;
     color: #f4f4f5;
     font-family: var(--font-sans);
@@ -17,8 +20,17 @@
     overscroll-behavior-y: none;
   }
 
-  input, textarea {
+  /* Prevent auto-zooming on mobile iOS Safari by ensuring font-size >= 16px */
+  input, textarea, select {
+    font-size: 16px !important;
     user-select: text;
+  }
+}
+
+/* Landscape lock barrier for mobile orientation */
+@media screen and (orientation: landscape) and (max-height: 600px) {
+  #landscape-lock-barrier {
+    display: flex !important;
   }
 }
 
@@ -39,6 +51,15 @@
 }
 
 /* Mobile safe area padding */
+.pt-safe {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
 .pb-safe {
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+.pl-safe {
+  padding-left: max(0px, env(safe-area-inset-left));
+}
+.pr-safe {
+  padding-right: max(0px, env(safe-area-inset-right));
 }

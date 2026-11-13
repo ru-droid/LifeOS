@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -13,9 +13,13 @@ import {
   Sparkles,
   ChevronRight,
   Trash2,
+  Flame,
+  Timer,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Task, HabitWithStreak, PriorityTier, FocusItem, DayEvent, Expense, Goal } from '../types/database';
+import { Task, HabitWithStreak, PriorityTier, DayEvent, Expense, Goal } from '../types/database';
 import { storage } from '../lib/storage';
 import { ScheduleModal, ExpensesModal, GoalsModal } from './InteractiveModals';
 import { QuickCaptureModal, CaptureCategory } from './QuickCaptureModal';
@@ -26,9 +30,28 @@ interface TodayViewProps {
   onToggleTask: (id: string) => void;
   onUpdateTaskTier: (id: string, tier: PriorityTier) => void;
   onDeleteTask: (id: string) => void;
-  onAddTask: (title: string, tier: PriorityTier) => void;
+  onAddTask: (title: string, tier: PriorityTier, description?: string, due_time?: string) => void;
   onToggleHabit: (id: string) => void;
-  onSwitchTab: (tab: 'inbox' | 'habits' | 'settings') => void;
+  onSwitchTab: (tab: 'inbox' | 'wallet' | 'habits' | 'documents' | 'settings') => void;
+}
+
+function parseDueMinutes(timeStr?: string): number | null {
+  if (!timeStr) return null;
+  const now = new Date();
+  let target: Date;
+
+  if (timeStr.includes('T') || timeStr.includes('-')) {
+    target = new Date(timeStr);
+  } else if (timeStr.includes(':')) {
+    const [h, m] = timeStr.split(':').map(Number);
+    target = new Date();
+    target.setHours(h, m, 0, 0);
+  } else {
+    return null;
+  }
+
+  if (isNaN(target.getTime())) return null;
+  return Math.round((target.getTime() - now.getTime()) / 60000);
 }
 
 export const TodayView: React.FC<TodayViewProps> = ({
@@ -41,13 +64,19 @@ export const TodayView: React.FC<TodayViewProps> = ({
   onToggleHabit,
   onSwitchTab,
 }) => {
-  // Local state for interactive cards
-  const [focusItems, setFocusItems] = useState<FocusItem[]>(storage.getFocusItems());
+  // Local state for interactive day cards
   const [events, setEvents] = useState<DayEvent[]>(storage.getEvents());
   const [expenses, setExpenses] = useState<Expense[]>(storage.getExpenses());
   const [goals, setGoals] = useState<Goal[]>(storage.getGoals());
-  const [newFocusTitle, setNewFocusTitle] = useState('');
-  const [showAddFocus, setShowAddFocus] = useState(false);
+
+  // Quick inline add for task due in 10 mins
+  const [showAddFocusForm, setShowAddFocusForm] = useState(false);
+  const [showCompletedFocus, setShowCompletedFocus] = useState(false);
+  const [quickTitle, setQuickTitle] = useState('');
+  const [quickDueOption, setQuickDueOption] = useState<number>(5); // 0 = now, 5 = in 5m, 10 = in 10m
+
+  // Live timer tick to re-evaluate due minutes every 15 seconds
+  const [ticker, setTicker] = useState(Date.now());
 
   // Modals state
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
@@ -58,7 +87,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
   const [showTasksDrawer, setShowTasksDrawer] = useState(false);
 
   const refreshLocalState = () => {
-    setFocusItems(storage.getFocusItems());
     setEvents(storage.getEvents());
     setExpenses(storage.getExpenses());
     setGoals(storage.getGoals());
@@ -66,7 +94,11 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
   useEffect(() => {
     const unsub = storage.subscribe(refreshLocalState);
-    return () => unsub();
+    const interval = setInterval(() => setTicker(Date.now()), 15000);
+    return () => {
+      unsub();
+      clearInterval(interval);
+    };
   }, []);
 
   // Format date matching the screenshot uppercase style: "SUNDAY · NOVEMBER 1"
@@ -82,8 +114,82 @@ export const TodayView: React.FC<TodayViewProps> = ({
   if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
   else if (hour >= 17) greeting = 'Good evening';
 
+  // =========================================================================
+  // DYNAMIC DERIVATION: "Today's Focus" derived from tasks & habits due in <= 10m
+  // =========================================================================
+  const derivedFocusItems = useMemo(() => {
+    const list: {
+      id: string;
+      sourceType: 'task' | 'habit';
+      sourceId: string;
+      title: string;
+      isCompleted: boolean;
+      dueLabel: string;
+      diffMinutes: number;
+    }[] = [];
+
+    // 1. Scan tasks
+    tasks.forEach((t) => {
+      if (t.due_time) {
+        const diff = parseDueMinutes(t.due_time);
+        // Due in 10 minutes or less (or overdue today within past 12h)
+        if (diff !== null && diff <= 10 && diff >= -720) {
+          let dueLabel = 'Due now';
+          if (diff > 0) dueLabel = `in ${diff}m`;
+          else if (diff < 0) dueLabel = `${Math.abs(diff)}m ago`;
+
+          list.push({
+            id: `task-${t.id}`,
+            sourceType: 'task',
+            sourceId: t.id,
+            title: t.title,
+            isCompleted: t.is_completed,
+            dueLabel,
+            diffMinutes: diff,
+          });
+        }
+      }
+    });
+
+    // 2. Scan habits
+    habits.forEach((h) => {
+      if (h.scheduled_time) {
+        const diff = parseDueMinutes(h.scheduled_time);
+        if (diff !== null && diff <= 10 && diff >= -720) {
+          let dueLabel = 'Due now';
+          if (diff > 0) dueLabel = `in ${diff}m`;
+          else if (diff < 0) dueLabel = `${Math.abs(diff)}m ago`;
+
+          list.push({
+            id: `habit-${h.id}`,
+            sourceType: 'habit',
+            sourceId: h.id,
+            title: h.title,
+            isCompleted: h.completedToday,
+            dueLabel,
+            diffMinutes: diff,
+          });
+        }
+      }
+    });
+
+    // Sort: incomplete items first, then by earliest due
+    return list.sort((a, b) => {
+      if (a.isCompleted !== b.isCompleted) {
+        return a.isCompleted ? 1 : -1;
+      }
+      return a.diffMinutes - b.diffMinutes;
+    });
+  }, [tasks, habits, ticker]);
+
+  const completedFocusCount = derivedFocusItems.filter((f) => f.isCompleted).length;
+  const totalFocusCount = derivedFocusItems.length;
+
+  const visibleFocusItems = useMemo(() => {
+    return derivedFocusItems.filter((item) => showCompletedFocus || !item.isCompleted);
+  }, [derivedFocusItems, showCompletedFocus]);
+
   // Metrics
-  const completedFocusCount = focusItems.filter((f) => f.is_completed).length;
   const todayTasks = tasks.filter((t) => t.priority_tier === 'today' && !t.is_completed);
   const monthlySpending = storage.getMonthlySpending();
 
@@ -99,9 +205,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
   // Goals status
   const activeGoalsCount = goals.filter((g) => !g.is_completed).length;
   const goalsStatusText =
-    goals.length === 0
-      ? 'No goals yet'
-      : `${activeGoalsCount} active`;
+    goals.length === 0 ? 'No goals yet' : `${activeGoalsCount} active`;
 
   const triggerConfetti = (e: React.MouseEvent) => {
     try {
@@ -112,29 +216,34 @@ export const TodayView: React.FC<TodayViewProps> = ({
         particleCount: 30,
         spread: 50,
         origin: { x, y },
-        colors: ['#2e4233', '#10b981', '#f59e0b', '#ffffff'],
+        colors: ['#223326', '#10b981', '#f59e0b', '#ffffff'],
         disableForReducedMotion: true,
       });
-    } catch {
-      // Ignore
-    }
+    } catch {}
   };
 
-  const handleToggleFocus = (e: React.MouseEvent, id: string, wasCompleted: boolean) => {
-    if (!wasCompleted) {
+  const handleToggleDerivedFocus = (
+    e: React.MouseEvent,
+    item: { sourceType: 'task' | 'habit'; sourceId: string; isCompleted: boolean }
+  ) => {
+    if (!item.isCompleted) {
       triggerConfetti(e);
     }
-    storage.toggleFocusItem(id);
-    refreshLocalState();
+    if (item.sourceType === 'task') {
+      onToggleTask(item.sourceId);
+    } else {
+      onToggleHabit(item.sourceId);
+    }
   };
 
-  const handleAddFocus = (e: React.FormEvent) => {
+  const handleCreateQuickFocusTask = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFocusTitle.trim()) return;
-    storage.addFocusItem(newFocusTitle.trim());
-    setNewFocusTitle('');
-    setShowAddFocus(false);
-    refreshLocalState();
+    if (!quickTitle.trim()) return;
+
+    const dueTimestamp = new Date(Date.now() + quickDueOption * 60 * 1000).toISOString();
+    onAddTask(quickTitle.trim(), 'today', undefined, dueTimestamp);
+    setQuickTitle('');
+    setShowAddFocusForm(false);
   };
 
   const openCapture = (category: CaptureCategory = 'task') => {
@@ -143,7 +252,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
   };
 
   return (
-    <div className="min-h-full bg-[#f6f4ee] text-stone-900 px-5 pt-5 pb-24 font-sans select-none antialiased">
+    <div className="min-h-full bg-[#f6f4ee] text-stone-900 px-5 pt-safe pt-5 pb-24 font-sans select-none antialiased">
       {/* =========================================================================
           TOP BAR: DATE & GREETING & PROFILE
          ========================================================================= */}
@@ -163,7 +272,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
         {/* Profile Avatar Button */}
         <button
           onClick={() => onSwitchTab('settings')}
-          className="w-12 h-12 rounded-full bg-stone-200/80 hover:bg-stone-300/80 text-stone-700 flex items-center justify-center transition active:scale-95 shadow-xs"
+          className="w-12 h-12 rounded-full bg-stone-200/80 hover:bg-stone-300/80 text-stone-700 flex items-center justify-center transition active:scale-95 shadow-2xs"
           title="Account & Settings"
           aria-label="Profile and Settings"
         >
@@ -173,89 +282,197 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
       <div className="space-y-4">
         {/* =========================================================================
-            CARD 1: TODAY'S FOCUS
+            CARD 1: TODAY'S FOCUS (Derived dynamically from tasks & habits due in <= 10m)
            ========================================================================= */}
         <div className="bg-white rounded-[26px] p-5 shadow-[0_2px_10px_rgba(0,0,0,0.03)] border border-stone-200/60">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-stone-900 tracking-tight">
-              Today's focus
-            </h2>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-stone-100 text-stone-600">
-                {completedFocusCount}/{focusItems.length}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-bold text-stone-900 tracking-tight">
+                Today's focus
+              </h2>
+              <div className="text-[11px] text-stone-400 font-medium">
+                Due in ≤ 10 minutes
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-stone-100 text-stone-600">
+                {completedFocusCount}/{totalFocusCount}
               </span>
+
+              {/* Eye toggle to show/hide completed focus items (hidden by default) */}
               <button
-                onClick={() => setShowAddFocus(!showAddFocus)}
-                className="w-6 h-6 rounded-full hover:bg-stone-100 text-stone-500 flex items-center justify-center transition"
-                title="Add focus item"
+                onClick={() => setShowCompletedFocus(!showCompletedFocus)}
+                className="w-7 h-7 rounded-full hover:bg-stone-100 text-stone-500 hover:text-stone-800 flex items-center justify-center transition active:scale-90"
+                title={showCompletedFocus ? 'Hide completed focus items' : 'Show completed focus items'}
+                aria-label="Toggle completed tasks"
+              >
+                {showCompletedFocus ? (
+                  <EyeOff className="w-4 h-4 text-stone-700" />
+                ) : (
+                  <Eye className="w-4 h-4 text-stone-500" />
+                )}
+              </button>
+
+              <button
+                onClick={() => setShowAddFocusForm(!showAddFocusForm)}
+                className="w-7 h-7 rounded-full hover:bg-stone-100 text-stone-500 hover:text-stone-800 flex items-center justify-center transition active:scale-90"
+                title="Add task due in 10 minutes"
               >
                 <Plus className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Focus Checklist */}
-          <div className="space-y-3">
-            {focusItems.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between group cursor-pointer"
-                onClick={(e) => handleToggleFocus(e, item.id, item.is_completed)}
-              >
-                <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
-                  <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
-                      item.is_completed
-                        ? 'bg-[#223326] text-white shadow-xs'
-                        : 'bg-stone-400/80 text-transparent hover:bg-stone-500'
-                    }`}
-                  >
-                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                  </div>
-                  <span
-                    className={`text-sm font-medium transition-colors ${
-                      item.is_completed
-                        ? 'line-through text-stone-400'
-                        : 'text-stone-800'
-                    }`}
-                  >
-                    {item.title}
-                  </span>
+          {/* Inline Add Quick Urgent Task */}
+          {showAddFocusForm && (
+            <form
+              onSubmit={handleCreateQuickFocusTask}
+              className="mb-3.5 p-3 rounded-2xl bg-stone-50 border border-stone-200/80 space-y-2.5 animate-in fade-in duration-150"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-stone-700">Add Urgent Focus Item</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAddFocusForm(false)}
+                  className="text-[11px] text-stone-400 hover:text-stone-700"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <input
+                type="text"
+                value={quickTitle}
+                onChange={(e) => setQuickTitle(e.target.value)}
+                placeholder="What needs immediate attention?"
+                autoFocus
+                className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-medium text-stone-800 focus:outline-none focus:border-stone-400"
+              />
+
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex gap-1.5">
+                  {[
+                    { label: 'Now', mins: 0 },
+                    { label: 'In 5m', mins: 5 },
+                    { label: 'In 10m', mins: 10 },
+                  ].map((opt) => (
+                    <button
+                      key={opt.mins}
+                      type="button"
+                      onClick={() => setQuickDueOption(opt.mins)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${
+                        quickDueOption === opt.mins
+                          ? 'bg-[#223326] text-white'
+                          : 'bg-white border border-stone-200 text-stone-600'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
 
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    storage.deleteFocusItem(item.id);
-                    refreshLocalState();
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-stone-300 hover:text-rose-500 rounded transition"
-                  title="Remove focus item"
+                  type="submit"
+                  disabled={!quickTitle.trim()}
+                  className="px-3 py-1 rounded-xl bg-[#223326] text-white text-xs font-bold disabled:opacity-40 hover:bg-[#2c4031] transition"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  Add to Focus
                 </button>
               </div>
-            ))}
+            </form>
+          )}
 
-            {/* Add New Focus Form */}
-            {showAddFocus && (
-              <form onSubmit={handleAddFocus} className="mt-2 flex gap-2 pt-2 border-t border-stone-100">
-                <input
-                  type="text"
-                  value={newFocusTitle}
-                  onChange={(e) => setNewFocusTitle(e.target.value)}
-                  placeholder="New focus priority..."
-                  className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-3 py-1.5 text-xs text-stone-800 focus:outline-none focus:border-stone-400"
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  disabled={!newFocusTitle.trim()}
-                  className="px-3 py-1.5 rounded-xl bg-[#223326] text-white text-xs font-semibold hover:bg-[#2c4031] disabled:opacity-40 transition"
+          {/* Derived Items Checklist */}
+          <div className="space-y-3">
+            {visibleFocusItems.length === 0 ? (
+              <div className="py-4 px-2 text-center text-stone-400">
+                {derivedFocusItems.length > 0 && !showCompletedFocus ? (
+                  <>
+                    <CheckCircle2 className="w-6 h-6 mx-auto mb-1.5 text-emerald-600/80" />
+                    <p className="text-xs font-semibold text-stone-700">
+                      All due focus items completed ({completedFocusCount}/{totalFocusCount})
+                    </p>
+                    <button
+                      onClick={() => setShowCompletedFocus(true)}
+                      className="mt-2 text-xs font-bold text-[#223326] underline hover:text-[#2c4031] transition"
+                    >
+                      Show completed items
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Timer className="w-6 h-6 mx-auto mb-1.5 opacity-40 text-stone-500" />
+                    <p className="text-xs font-medium text-stone-600">
+                      No tasks or habits due in the next 10 minutes.
+                    </p>
+                    <p className="text-[11px] text-stone-400 mt-0.5">
+                      Items automatically appear here when due in ≤ 10 min.
+                    </p>
+                    <button
+                      onClick={() => setShowAddFocusForm(true)}
+                      className="mt-2.5 text-xs font-bold text-[#223326] underline hover:text-[#2c4031] transition"
+                    >
+                      + Schedule a task for now
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
+              visibleFocusItems.map((item) => (
+                <div
+                  key={item.id}
+                  className={`flex items-center justify-between group cursor-pointer transition-opacity ${
+                    item.isCompleted ? 'opacity-50' : 'opacity-100'
+                  }`}
+                  onClick={(e) => handleToggleDerivedFocus(e, item)}
                 >
-                  Add
-                </button>
-              </form>
+                  <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
+                    {/* Circle matching reference screenshot */}
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${
+                        item.isCompleted
+                          ? 'bg-[#223326] text-white shadow-2xs'
+                          : 'bg-stone-400/80 text-transparent hover:bg-stone-500'
+                      }`}
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className={`text-sm font-medium leading-snug transition-colors truncate ${
+                          item.isCompleted
+                            ? 'line-through text-stone-400'
+                            : 'text-stone-800'
+                        }`}
+                      >
+                        {item.title}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Due in Badge */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        item.isCompleted
+                          ? 'bg-stone-100 text-stone-400'
+                          : item.diffMinutes <= 0
+                          ? 'bg-rose-100 text-rose-700'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {item.dueLabel}
+                    </span>
+                    {item.sourceType === 'habit' && (
+                      <span className="text-[10px] font-semibold text-stone-400">
+                        Habit
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -324,9 +541,9 @@ export const TodayView: React.FC<TodayViewProps> = ({
             </div>
           </div>
 
-          {/* Card 2: Monthly spending */}
+          {/* Card 2: Monthly spending -> opens Wallet tab */}
           <div
-            onClick={() => setIsExpensesOpen(true)}
+            onClick={() => onSwitchTab('wallet')}
             className="bg-white rounded-[24px] p-4 shadow-[0_2px_10px_rgba(0,0,0,0.03)] border border-stone-200/60 cursor-pointer hover:border-stone-300 transition active:scale-[0.98] flex flex-col justify-between"
           >
             <div>
@@ -442,10 +659,10 @@ export const TodayView: React.FC<TodayViewProps> = ({
         onCaptured={refreshLocalState}
       />
 
-      {/* Quick Tasks Slide-Over / Modal */}
+      {/* Quick Tasks Drawer */}
       {showTasksDrawer && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => setShowTasksDrawer(false)}
         >
           <div
@@ -484,11 +701,11 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 todayTasks.map((t) => (
                   <div
                     key={t.id}
-                    className="flex items-center justify-between p-3 rounded-2xl bg-white border border-stone-200/70 shadow-xs"
+                    className="flex items-center justify-between p-3 rounded-2xl bg-white border border-stone-200/70 shadow-2xs"
                   >
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={(e) => onToggleTask(t.id)}
+                        onClick={() => onToggleTask(t.id)}
                         className="w-5 h-5 rounded-full border border-stone-400 hover:border-stone-700 transition"
                       />
                       <span className="text-sm font-medium text-stone-800">{t.title}</span>

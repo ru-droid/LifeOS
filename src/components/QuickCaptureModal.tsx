@@ -18,7 +18,7 @@ export type CaptureCategory = 'task' | 'expense' | 'note' | 'event';
 interface QuickCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (title: string, tier: PriorityTier, description?: string) => void;
+  onSubmit: (title: string, tier: PriorityTier, description?: string, due_time?: string) => void;
   defaultTier?: PriorityTier;
   initialCategory?: CaptureCategory;
   onCaptured?: () => void;

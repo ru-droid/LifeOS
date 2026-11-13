@@ -11,6 +11,13 @@ import {
   Expense,
   Goal,
   Note,
+  WalletTransaction,
+  BillSplit,
+  UserDocument,
+  DocumentCustomField,
+  ScheduledTransaction,
+  TransactionFrequency,
+  TransactionStatus,
 } from '../types/database';
 import { getSupabaseClient } from './supabase';
 
@@ -23,6 +30,12 @@ const EVENTS_KEY = 'kairon_events_v1';
 const EXPENSES_KEY = 'kairon_expenses_v1';
 const GOALS_KEY = 'kairon_goals_v1';
 const NOTES_KEY = 'kairon_notes_v1';
+const WALLET_BALANCE_KEY = 'kairon_wallet_balance_v1';
+const WALLET_TXS_KEY = 'kairon_wallet_txs_v1';
+const WALLET_SPLITS_KEY = 'kairon_wallet_splits_v1';
+const DOCUMENTS_KEY = 'kairon_documents_v1';
+const SCHEDULED_TXS_KEY = 'kairon_scheduled_txs_v1';
+const BALANCE_VISIBLE_KEY = 'kairon_balance_visible_v1';
 
 // In-memory fallback if localStorage is unavailable or blocked in iframe
 const memoryFallback: Record<string, string> = {};
@@ -88,33 +101,35 @@ const DEFAULT_PROFILE: Profile = {
   updated_at: new Date().toISOString(),
 };
 
-// Seed Focus items (matches user screenshot exactly)
+// Seed Focus items (kept for backward compatibility)
 const SEED_FOCUS: FocusItem[] = [
   { id: 'focus-1', title: 'Choose your top priority', is_completed: false },
   { id: 'focus-2', title: 'Review today’s schedule', is_completed: false },
   { id: 'focus-3', title: 'Plan one personal activity', is_completed: false },
 ];
 
-// Default seed data with everyday personal tasks
+// Seed tasks: tasks 1 & 2 have due_time within 10 minutes so "Today's focus" immediately shows active items!
 const SEED_TASKS: Task[] = [
   {
     id: 'seed-task-1',
     user_id: 'user-001',
-    title: 'Grocery shopping & meal prep for the week',
-    description: 'Pick up fresh produce, olive oil, and essentials.',
+    title: 'Pick up fresh groceries & meal ingredients',
+    description: 'Olive oil, sourdough bread, and greens.',
     priority_tier: 'today',
     is_completed: false,
     completed_at: null,
+    due_time: new Date(Date.now() + 6 * 60 * 1000).toISOString(), // Due in 6 minutes
     created_at: new Date(Date.now() - 3600000 * 3).toISOString(),
   },
   {
     id: 'seed-task-2',
     user_id: 'user-001',
-    title: 'Review monthly budget & pay utility bills',
-    description: 'Electric and internet statements due on Friday.',
+    title: 'Review weekly budget statement & pay utility bill',
+    description: 'Electricity bill confirmation due.',
     priority_tier: 'today',
     is_completed: false,
     completed_at: null,
+    due_time: new Date(Date.now() + 9 * 60 * 1000).toISOString(), // Due in 9 minutes
     created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
   },
   {
@@ -169,6 +184,121 @@ const SEED_TASKS: Task[] = [
   },
 ];
 
+const SEED_WALLET_TXS: WalletTransaction[] = [
+  {
+    id: 'seed-tx-1',
+    type: 'pay',
+    amount: 450,
+    description: 'Groceries & fresh vegetables',
+    person: 'Fresh Supermarket',
+    date: getIsoDate(),
+    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+  },
+  {
+    id: 'seed-tx-2',
+    type: 'receive',
+    amount: 12000,
+    description: 'Freelance UI Design Milestone',
+    person: 'Studio Craft',
+    date: getIsoDate(),
+    created_at: new Date(Date.now() - 3600000 * 5).toISOString(),
+  },
+];
+
+const SEED_SCHEDULED_TXS: ScheduledTransaction[] = [
+  {
+    id: 'seed-sch-1',
+    user_id: 'user-001',
+    amount: 649,
+    recipient: 'Netflix 4K Ultra',
+    category: 'Subscriptions',
+    note: 'Family plan auto-debit',
+    scheduled_date: getIsoDate(new Date(Date.now() + 86400000 * 2)),
+    frequency: 'monthly',
+    status: 'pending',
+    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
+  },
+  {
+    id: 'seed-sch-2',
+    user_id: 'user-001',
+    amount: 1299,
+    recipient: 'Airtel Fiber Broadband',
+    category: 'Utilities',
+    note: '300 Mbps unlimited fiber',
+    scheduled_date: getIsoDate(new Date(Date.now() + 86400000 * 5)),
+    frequency: 'monthly',
+    status: 'pending',
+    created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+  },
+];
+
+const SEED_SPLITS: BillSplit[] = [
+  {
+    id: 'seed-split-1',
+    title: 'Weekend Dinner & Cafe',
+    total_amount: 1500,
+    people_count: 3,
+    split_type: 'equal',
+    participants: [
+      { id: 'p1', name: 'You', amount: 500, paid: true },
+      { id: 'p2', name: 'Rahul', amount: 500, paid: false },
+      { id: 'p3', name: 'Ananya', amount: 500, paid: true },
+    ],
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+];
+
+const SEED_DOCUMENTS: UserDocument[] = [
+  {
+    id: 'doc-seed-1',
+    user_id: 'user-001',
+    name: 'Passport',
+    doc_number: 'Z9823412',
+    file_url: null,
+    file_name: 'passport_scan.jpg',
+    file_type: 'image/jpeg',
+    custom_fields: [
+      { id: 'cf-1', label: 'Expiry Date', value: '2032-08-14', show_on_card: true },
+      { id: 'cf-2', label: 'Nationality', value: 'Indian', show_on_card: true },
+      { id: 'cf-3', label: 'Place of Issue', value: 'Mumbai', show_on_card: false },
+    ],
+    created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+    updated_at: new Date(Date.now() - 86400000 * 30).toISOString(),
+  },
+  {
+    id: 'doc-seed-2',
+    user_id: 'user-001',
+    name: "Driver's License",
+    doc_number: 'DL-0420110034567',
+    file_url: null,
+    file_name: 'drivers_license.pdf',
+    file_type: 'application/pdf',
+    custom_fields: [
+      { id: 'cf-4', label: 'Class', value: 'LMV / MCWG', show_on_card: true },
+      { id: 'cf-5', label: 'Valid Till', value: '2035-11-20', show_on_card: true },
+      { id: 'cf-6', label: 'Blood Group', value: 'O+ Positive', show_on_card: false },
+    ],
+    created_at: new Date(Date.now() - 86400000 * 15).toISOString(),
+    updated_at: new Date(Date.now() - 86400000 * 15).toISOString(),
+  },
+  {
+    id: 'doc-seed-3',
+    user_id: 'user-001',
+    name: 'Health Insurance Policy',
+    doc_number: 'POL-9021-X9',
+    file_url: null,
+    file_name: 'health_policy.pdf',
+    file_type: 'application/pdf',
+    custom_fields: [
+      { id: 'cf-7', label: 'Provider', value: 'Star Health Care', show_on_card: true },
+      { id: 'cf-8', label: 'Sum Insured', value: '₹10,00,000', show_on_card: true },
+      { id: 'cf-9', label: 'TPA Contact', value: '1800-425-2255', show_on_card: false },
+    ],
+    created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+    updated_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+  },
+];
+
 const SEED_HABITS: Habit[] = [
   {
     id: 'seed-habit-1',
@@ -176,6 +306,7 @@ const SEED_HABITS: Habit[] = [
     title: 'Drink 2L Water',
     icon: 'droplet',
     frequency: 'daily',
+    scheduled_time: new Date(Date.now() + 4 * 60 * 1000).toISOString(), // Due in 4 minutes
     archived: false,
     created_at: new Date(Date.now() - 86400000 * 14).toISOString(),
   },
@@ -295,6 +426,18 @@ export class LocalFirstStorage {
     }
     if (!safeStorage.getItem(NOTES_KEY)) {
       safeStorage.setItem(NOTES_KEY, JSON.stringify([]));
+    }
+    if (!safeStorage.getItem(WALLET_BALANCE_KEY)) {
+      safeStorage.setItem(WALLET_BALANCE_KEY, JSON.stringify(25000));
+    }
+    if (!safeStorage.getItem(WALLET_TXS_KEY)) {
+      safeStorage.setItem(WALLET_TXS_KEY, JSON.stringify(SEED_WALLET_TXS));
+    }
+    if (!safeStorage.getItem(WALLET_SPLITS_KEY)) {
+      safeStorage.setItem(WALLET_SPLITS_KEY, JSON.stringify(SEED_SPLITS));
+    }
+    if (!safeStorage.getItem(DOCUMENTS_KEY)) {
+      safeStorage.setItem(DOCUMENTS_KEY, JSON.stringify(SEED_DOCUMENTS));
     }
   }
 
@@ -503,6 +646,362 @@ export class LocalFirstStorage {
     this.notify();
   }
 
+  // Wallet Balance Visibility (Hidden by default)
+  public isBalanceVisible(): boolean {
+    try {
+      const val = safeStorage.getItem(BALANCE_VISIBLE_KEY);
+      // Default to false if not set
+      return val === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  public setBalanceVisible(visible: boolean): void {
+    safeStorage.setItem(BALANCE_VISIBLE_KEY, visible ? 'true' : 'false');
+    this.notify();
+  }
+
+  // Wallet State & Transactions
+  public getWalletBalance(): number {
+    try {
+      const raw = safeStorage.getItem(WALLET_BALANCE_KEY);
+      return raw ? Number(JSON.parse(raw)) : 25000;
+    } catch {
+      return 25000;
+    }
+  }
+
+  public setWalletBalance(amount: number): void {
+    safeStorage.setItem(WALLET_BALANCE_KEY, JSON.stringify(Math.max(0, amount)));
+    this.notify();
+  }
+
+  public getWalletTransactions(): WalletTransaction[] {
+    try {
+      const raw = safeStorage.getItem(WALLET_TXS_KEY);
+      return raw ? JSON.parse(raw) : SEED_WALLET_TXS;
+    } catch {
+      return SEED_WALLET_TXS;
+    }
+  }
+
+  public addWalletTransaction(entry: {
+    type: 'pay' | 'receive';
+    amount: number;
+    description: string;
+    person: string;
+    category?: string;
+    date?: string;
+  }): WalletTransaction {
+    const currentBalance = this.getWalletBalance();
+    const newTx: WalletTransaction = {
+      id: 'tx_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
+      type: entry.type,
+      amount: Math.abs(entry.amount),
+      description: entry.description.trim(),
+      person: entry.person.trim(),
+      category: entry.category?.trim() || undefined,
+      date: entry.date || getIsoDate(),
+      created_at: new Date().toISOString(),
+    };
+
+    const updatedTxs = [newTx, ...this.getWalletTransactions()];
+    safeStorage.setItem(WALLET_TXS_KEY, JSON.stringify(updatedTxs));
+
+    // Update wallet balance automatically
+    if (entry.type === 'pay') {
+      this.setWalletBalance(Math.max(0, currentBalance - Math.abs(entry.amount)));
+      // Also push to Today's Focus / Daily Hub spending metric
+      this.addExpense(entry.description || `Payment to ${entry.person}`, Math.abs(entry.amount));
+    } else {
+      this.setWalletBalance(currentBalance + Math.abs(entry.amount));
+    }
+
+    this.notify();
+    return newTx;
+  }
+
+  public deleteWalletTransaction(id: string): void {
+    const txs = this.getWalletTransactions().filter((t) => t.id !== id);
+    safeStorage.setItem(WALLET_TXS_KEY, JSON.stringify(txs));
+    this.notify();
+  }
+
+  // Scheduled Transactions (Option 2)
+  public getScheduledTransactions(): ScheduledTransaction[] {
+    try {
+      const raw = safeStorage.getItem(SCHEDULED_TXS_KEY);
+      return raw ? JSON.parse(raw) : SEED_SCHEDULED_TXS;
+    } catch {
+      return SEED_SCHEDULED_TXS;
+    }
+  }
+
+  public addScheduledTransaction(entry: {
+    amount: number;
+    recipient: string;
+    category?: string;
+    note?: string | null;
+    scheduled_date: string;
+    frequency?: TransactionFrequency;
+  }): ScheduledTransaction {
+    const profile = this.getProfile();
+    const isToday = entry.scheduled_date === getIsoDate();
+    const schId = 'sch_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+
+    // Update Today's Focus with upcoming payment reminder badge
+    // Adds a high-priority task due in 10 minutes (or now) so it derives in Today's Focus!
+    const dueTime = isToday
+      ? new Date(Date.now() + 5 * 60 * 1000).toISOString()
+      : `${entry.scheduled_date}T09:00:00.000Z`;
+
+    const linkedTask = this.addTask(
+      `Pay ${entry.recipient} · ₹${entry.amount.toLocaleString()}`,
+      isToday ? 'today' : 'upcoming',
+      entry.note || `Scheduled payment (${entry.frequency || 'once'})`,
+      dueTime,
+      schId
+    );
+
+    const newScheduled: ScheduledTransaction = {
+      id: schId,
+      user_id: profile.id,
+      amount: Math.abs(entry.amount),
+      recipient: entry.recipient.trim(),
+      category: entry.category?.trim() || 'General',
+      note: entry.note?.trim() || null,
+      scheduled_date: entry.scheduled_date,
+      frequency: entry.frequency || 'once',
+      status: 'pending',
+      linked_task_id: linkedTask.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const list = [newScheduled, ...this.getScheduledTransactions()];
+    safeStorage.setItem(SCHEDULED_TXS_KEY, JSON.stringify(list));
+    this.notify();
+    return newScheduled;
+  }
+
+  public updateScheduledTransaction(id: string, updates: Partial<ScheduledTransaction>): void {
+    const list = this.getScheduledTransactions();
+    const existing = list.find((s) => s.id === id);
+    if (!existing) return;
+
+    const updated = list.map((s) => {
+      if (s.id === id) {
+        return {
+          ...s,
+          ...updates,
+          amount: updates.amount !== undefined ? Math.abs(updates.amount) : s.amount,
+          recipient: updates.recipient !== undefined ? updates.recipient.trim() : s.recipient,
+          category: updates.category !== undefined ? updates.category.trim() : s.category,
+          note: updates.note !== undefined ? (updates.note ? updates.note.trim() : null) : s.note,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return s;
+    });
+
+    safeStorage.setItem(SCHEDULED_TXS_KEY, JSON.stringify(updated));
+
+    // Also update any linked task in Today's Focus / Tasks
+    const nextItem = updated.find((s) => s.id === id);
+    if (nextItem) {
+      const tasks = this.getTasks().map((t) => {
+        const isLinked = t.linked_transaction_id === id || t.id === existing.linked_task_id;
+        if (isLinked) {
+          const isToday = nextItem.scheduled_date === getIsoDate();
+          return {
+            ...t,
+            title: `Pay ${nextItem.recipient} · ₹${nextItem.amount.toLocaleString()}`,
+            description: nextItem.note || `Scheduled payment (${nextItem.frequency})`,
+            priority_tier: (isToday ? 'today' : 'upcoming') as PriorityTier,
+            due_time: isToday ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : `${nextItem.scheduled_date}T09:00:00.000Z`,
+            updated_at: new Date().toISOString(),
+          };
+        }
+        return t;
+      });
+      safeStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+    }
+
+    this.notify();
+  }
+
+  public processScheduledTransaction(id: string): void {
+    const list = this.getScheduledTransactions();
+    const item = list.find((s) => s.id === id);
+    if (!item) return;
+
+    // 1. Deduct from balance and record in transaction history
+    this.addWalletTransaction({
+      type: 'pay',
+      amount: item.amount,
+      description: item.note || `Scheduled payment: ${item.recipient} (${item.category})`,
+      person: item.recipient,
+      category: item.category,
+      date: getIsoDate(),
+    });
+
+    // 2. Set status to 'paid'
+    const updated = list.map((s) => {
+      if (s.id === id) {
+        return {
+          ...s,
+          status: 'paid' as TransactionStatus,
+          last_processed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return s;
+    });
+
+    safeStorage.setItem(SCHEDULED_TXS_KEY, JSON.stringify(updated));
+
+    // 3. Locate any linked task in Today's Focus and automatically mark it completed and hidden
+    const tasks = this.getTasks().map((t) => {
+      const isLinked =
+        t.linked_transaction_id === id ||
+        item.linked_task_id === t.id ||
+        (t.title.toLowerCase().startsWith('pay ') && t.title.includes(item.recipient));
+      if (isLinked) {
+        return {
+          ...t,
+          is_completed: true,
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return t;
+    });
+
+    safeStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+    this.notify();
+  }
+
+  public cancelScheduledTransaction(id: string): void {
+    const updated = this.getScheduledTransactions().map((s) =>
+      s.id === id ? { ...s, status: 'cancelled' as TransactionStatus, updated_at: new Date().toISOString() } : s
+    );
+    safeStorage.setItem(SCHEDULED_TXS_KEY, JSON.stringify(updated));
+    this.notify();
+  }
+
+  public deleteScheduledTransaction(id: string): void {
+    const filtered = this.getScheduledTransactions().filter((s) => s.id !== id);
+    safeStorage.setItem(SCHEDULED_TXS_KEY, JSON.stringify(filtered));
+    this.notify();
+  }
+
+  public getSplits(): BillSplit[] {
+    try {
+      const raw = safeStorage.getItem(WALLET_SPLITS_KEY);
+      return raw ? JSON.parse(raw) : SEED_SPLITS;
+    } catch {
+      return SEED_SPLITS;
+    }
+  }
+
+  public addSplit(split: Omit<BillSplit, 'id' | 'created_at'>): BillSplit {
+    const newSplit: BillSplit = {
+      ...split,
+      id: 'split_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
+      created_at: new Date().toISOString(),
+    };
+    const splits = [newSplit, ...this.getSplits()];
+    safeStorage.setItem(WALLET_SPLITS_KEY, JSON.stringify(splits));
+    this.notify();
+    return newSplit;
+  }
+
+  public updateSplit(id: string, updates: Partial<BillSplit>): void {
+    const splits = this.getSplits().map((s) =>
+      s.id === id ? { ...s, ...updates } : s
+    );
+    safeStorage.setItem(WALLET_SPLITS_KEY, JSON.stringify(splits));
+    this.notify();
+  }
+
+  public toggleSplitParticipantPaid(splitId: string, participantId: string): void {
+    const splits = this.getSplits().map((split) => {
+      if (split.id === splitId) {
+        return {
+          ...split,
+          participants: split.participants.map((p) =>
+            p.id === participantId ? { ...p, paid: !p.paid } : p
+          ),
+        };
+      }
+      return split;
+    });
+    safeStorage.setItem(WALLET_SPLITS_KEY, JSON.stringify(splits));
+    this.notify();
+  }
+
+  public deleteSplit(id: string): void {
+    const splits = this.getSplits().filter((s) => s.id !== id);
+    safeStorage.setItem(WALLET_SPLITS_KEY, JSON.stringify(splits));
+    this.notify();
+  }
+
+  // Documents Vault
+  public getDocuments(): UserDocument[] {
+    try {
+      const raw = safeStorage.getItem(DOCUMENTS_KEY);
+      return raw ? JSON.parse(raw) : SEED_DOCUMENTS;
+    } catch {
+      return SEED_DOCUMENTS;
+    }
+  }
+
+  public addDocument(doc: {
+    name: string;
+    doc_number?: string | null;
+    file_url?: string | null;
+    file_name?: string | null;
+    file_type?: string | null;
+    custom_fields?: DocumentCustomField[];
+  }): UserDocument {
+    const profile = this.getProfile();
+    const newDoc: UserDocument = {
+      id: 'doc_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36),
+      user_id: profile.id,
+      name: doc.name.trim(),
+      doc_number: doc.doc_number ? doc.doc_number.trim() : null,
+      file_url: doc.file_url || null,
+      file_name: doc.file_name || null,
+      file_type: doc.file_type || null,
+      custom_fields: doc.custom_fields || [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const updated = [newDoc, ...this.getDocuments()];
+    safeStorage.setItem(DOCUMENTS_KEY, JSON.stringify(updated));
+    this.notify();
+    this.syncToCloud();
+    return newDoc;
+  }
+
+  public updateDocument(id: string, updates: Partial<UserDocument>): void {
+    const list = this.getDocuments().map((d) =>
+      d.id === id ? { ...d, ...updates, updated_at: new Date().toISOString() } : d
+    );
+    safeStorage.setItem(DOCUMENTS_KEY, JSON.stringify(list));
+    this.notify();
+    this.syncToCloud();
+  }
+
+  public deleteDocument(id: string): void {
+    const list = this.getDocuments().filter((d) => d.id !== id);
+    safeStorage.setItem(DOCUMENTS_KEY, JSON.stringify(list));
+    this.notify();
+    this.syncToCloud();
+  }
+
   // Tasks
   public getTasks(): Task[] {
     try {
@@ -513,7 +1012,13 @@ export class LocalFirstStorage {
     }
   }
 
-  public addTask(title: string, priority_tier: PriorityTier = 'someday', description: string | null = null): Task {
+  public addTask(
+    title: string,
+    priority_tier: PriorityTier = 'someday',
+    description: string | null = null,
+    due_time?: string,
+    linked_transaction_id?: string | null
+  ): Task {
     const profile = this.getProfile();
     const newTask: Task = {
       id: 'task_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36),
@@ -523,6 +1028,8 @@ export class LocalFirstStorage {
       priority_tier,
       is_completed: false,
       completed_at: null,
+      due_time: due_time || undefined,
+      linked_transaction_id: linked_transaction_id || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -534,10 +1041,62 @@ export class LocalFirstStorage {
     return newTask;
   }
 
+  public setTaskDueTime(id: string, due_time?: string): void {
+    const tasks = this.getTasks().map((t) => (t.id === id ? { ...t, due_time, updated_at: new Date().toISOString() } : t));
+    safeStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+    this.notify();
+  }
+
   public toggleTaskCompletion(id: string): void {
+    const currentTask = this.getTasks().find((t) => t.id === id);
+    if (!currentTask) return;
+    const nextCompleted = !currentTask.is_completed;
+
+    // Check if task is linked to a payment
+    let linkedSch: ScheduledTransaction | undefined;
+    if (currentTask.linked_transaction_id) {
+      linkedSch = this.getScheduledTransactions().find((s) => s.id === currentTask.linked_transaction_id);
+    } else {
+      linkedSch = this.getScheduledTransactions().find(
+        (s) =>
+          s.linked_task_id === id ||
+          (s.status !== 'paid' &&
+            currentTask.title.toLowerCase().startsWith('pay ') &&
+            currentTask.title.includes(s.recipient))
+      );
+    }
+
+    // Two-Way Task <-> Wallet Sync:
+    // When a task linked to a payment is marked completed in Today's Focus:
+    // 1. Deduct the amount from the Wallet balance.
+    // 2. Add an entry to the transactions history table.
+    // 3. Update the corresponding scheduled_transactions record to status 'paid'.
+    if (nextCompleted && linkedSch && linkedSch.status !== 'paid') {
+      this.addWalletTransaction({
+        type: 'pay',
+        amount: linkedSch.amount,
+        description: linkedSch.note || `Payment: ${linkedSch.recipient} (${linkedSch.category})`,
+        person: linkedSch.recipient,
+        category: linkedSch.category,
+        date: getIsoDate(),
+      });
+
+      const updatedSchs = this.getScheduledTransactions().map((s) => {
+        if (s.id === linkedSch!.id) {
+          return {
+            ...s,
+            status: 'paid' as TransactionStatus,
+            last_processed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+        return s;
+      });
+      safeStorage.setItem(SCHEDULED_TXS_KEY, JSON.stringify(updatedSchs));
+    }
+
     const tasks = this.getTasks().map((t) => {
       if (t.id === id) {
-        const nextCompleted = !t.is_completed;
         return {
           ...t,
           is_completed: nextCompleted,
@@ -803,6 +1362,12 @@ export class LocalFirstStorage {
     safeStorage.removeItem(EVENTS_KEY);
     safeStorage.removeItem(EXPENSES_KEY);
     safeStorage.removeItem(GOALS_KEY);
+    safeStorage.removeItem(WALLET_BALANCE_KEY);
+    safeStorage.removeItem(WALLET_TXS_KEY);
+    safeStorage.removeItem(WALLET_SPLITS_KEY);
+    safeStorage.removeItem(DOCUMENTS_KEY);
+    safeStorage.removeItem(SCHEDULED_TXS_KEY);
+    safeStorage.removeItem(BALANCE_VISIBLE_KEY);
     this.ensureInitialized();
     this.notify();
   }
@@ -838,6 +1403,9 @@ export class LocalFirstStorage {
 
       const localLogs = this.getHabitLogs().map((l) => ({ ...l, user_id: user.id }));
       await (supabase.from('habit_logs') as any).upsert(localLogs, { onConflict: 'id' });
+
+      const localDocs = this.getDocuments().map((d) => ({ ...d, user_id: user.id }));
+      await (supabase.from('documents') as any).upsert(localDocs, { onConflict: 'id' });
 
       this.setSync('cloud_connected');
     } catch (err) {

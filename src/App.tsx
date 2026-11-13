@@ -5,22 +5,34 @@
 
 import React, { useState, useEffect } from 'react';
 import { storage } from './lib/storage';
-import { Task, HabitWithStreak, Profile, SyncStatus, PriorityTier } from './types/database';
+import {
+  Task,
+  HabitWithStreak,
+  Profile,
+  SyncStatus,
+  PriorityTier,
+  UserDocument,
+  DocumentCustomField,
+} from './types/database';
 import { Header } from './components/Header';
 import { BottomNav, TabType } from './components/BottomNav';
 import { TodayView } from './components/TodayView';
 import { InboxView } from './components/InboxView';
+import { WalletView } from './components/WalletView';
 import { HabitsView } from './components/HabitsView';
+import { DocumentList } from './components/documents/DocumentList';
 import { SettingsView } from './components/SettingsView';
 import { QuickCaptureModal, FloatingActionButton } from './components/QuickCaptureModal';
 import { AuthModal } from './components/AuthModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { Smartphone } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('today');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [habitsWithStreaks, setHabitsWithStreaks] = useState<HabitWithStreak[]>([]);
+  const [documents, setDocuments] = useState<UserDocument[]>([]);
   const [profile, setProfile] = useState<Profile>(storage.getProfile());
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(storage.getSyncStatus());
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
@@ -32,6 +44,7 @@ export default function App() {
     const refreshState = () => {
       setTasks(storage.getTasks());
       setHabitsWithStreaks(storage.getHabitsWithStreaks());
+      setDocuments(storage.getDocuments());
       setProfile(storage.getProfile());
     };
 
@@ -77,8 +90,8 @@ export default function App() {
     storage.deleteTask(id);
   };
 
-  const handleAddTask = (title: string, tier: PriorityTier, description?: string) => {
-    storage.addTask(title, tier, description || null);
+  const handleAddTask = (title: string, tier: PriorityTier, description?: string, due_time?: string) => {
+    storage.addTask(title, tier, description || null, due_time);
   };
 
   // Habit Handlers
@@ -102,6 +115,26 @@ export default function App() {
     storage.deleteHabit(habitId);
   };
 
+  // Document Handlers
+  const handleAddDocument = (doc: {
+    name: string;
+    doc_number?: string | null;
+    file_url?: string | null;
+    file_name?: string | null;
+    file_type?: string | null;
+    custom_fields: DocumentCustomField[];
+  }) => {
+    storage.addDocument(doc);
+  };
+
+  const handleUpdateDocument = (id: string, updates: Partial<UserDocument>) => {
+    storage.updateDocument(id, updates);
+  };
+
+  const handleDeleteDocument = (id: string) => {
+    storage.deleteDocument(id);
+  };
+
   const handleSignOut = () => {
     storage.resetToDemo();
   };
@@ -117,14 +150,32 @@ export default function App() {
   const tabTitles: Record<TabType, string> = {
     today: 'Today',
     inbox: 'Tasks & Backlog',
+    wallet: 'Wallet & Split',
     habits: 'Daily Habits',
-    settings: 'Settings',
+    documents: 'Documents Vault',
+    settings: 'Settings & Account',
   };
 
   return (
-    <div className="min-h-screen bg-[#07080b] flex justify-center text-stone-900 antialiased selection:bg-[#223326]/20">
-      {/* Restricted Mobile Shell Container */}
-      <div className="w-full max-w-md min-h-screen pb-16 relative flex flex-col bg-[#f6f4ee] border-x border-stone-300/30 shadow-2xl">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#07080b] flex justify-center text-stone-900 antialiased selection:bg-[#223326]/20">
+      {/* Fallback overlay when rotated to landscape on mobile */}
+      <div
+        id="landscape-lock-barrier"
+        className="hidden fixed inset-0 z-[100] bg-[#07080b] flex-col items-center justify-center p-6 text-center text-stone-100"
+      >
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4 text-amber-400">
+          <Smartphone className="w-7 h-7 rotate-90 animate-pulse" />
+        </div>
+        <h3 className="text-lg font-bold tracking-tight text-white mb-1.5">
+          Please rotate your device
+        </h3>
+        <p className="text-xs text-stone-400 max-w-xs leading-relaxed">
+          Kairon is crafted exclusively for portrait mobile view. Please rotate back to portrait mode for the optimal experience.
+        </p>
+      </div>
+
+      {/* Restricted Mobile Shell Container with Safe Area & Notch / Dynamic Island Handling */}
+      <div className="w-full max-w-md min-h-screen pb-16 relative flex flex-col bg-[#f6f4ee] border-x border-stone-300/30 shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         {/* Sticky Top Bar for Sub-Views */}
         {activeTab !== 'today' && (
           <Header
@@ -162,6 +213,8 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'wallet' && <WalletView />}
+
           {activeTab === 'habits' && (
             <HabitsView
               habits={habitsWithStreaks}
@@ -169,6 +222,15 @@ export default function App() {
               onAddHabit={handleAddHabit}
               onArchiveHabit={handleArchiveHabit}
               onDeleteHabit={handleDeleteHabit}
+            />
+          )}
+
+          {activeTab === 'documents' && (
+            <DocumentList
+              documents={documents}
+              onAddDocument={handleAddDocument}
+              onUpdateDocument={handleUpdateDocument}
+              onDeleteDocument={handleDeleteDocument}
             />
           )}
 
@@ -182,8 +244,8 @@ export default function App() {
           )}
         </main>
 
-        {/* Persistent Floating Action Button (FAB) on non-today views */}
-        {activeTab !== 'today' && !isCaptureOpen && (
+        {/* Persistent Floating Action Button (FAB) on non-today views, hidden on documents where list has its own header action */}
+        {activeTab !== 'today' && activeTab !== 'documents' && !isCaptureOpen && (
           <FloatingActionButton onClick={() => setIsCaptureOpen(true)} />
         )}
 
@@ -207,13 +269,14 @@ export default function App() {
         {/* Offline Indicator Banner */}
         <OfflineIndicator />
 
-        {/* Fixed Bottom Navigation Bar */}
+        {/* Fixed Bottom Navigation Bar (Today | Tasks | Wallet | Habits | Documents) */}
         <BottomNav
           activeTab={activeTab}
           onChangeTab={setActiveTab}
           todayCount={todayCount}
           inboxCount={inboxCount}
           habitsSummary={habitsSummary}
+          documentsCount={documents.length}
         />
       </div>
     </div>

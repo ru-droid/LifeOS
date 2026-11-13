@@ -22,7 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { isInstallable, install } = usePWAInstall();
 
   return (
-    <header className="sticky top-0 z-40 bg-[#f6f4ee]/95 backdrop-blur-md border-b border-stone-200/70 px-4 py-3">
+    <header className="sticky top-0 z-40 bg-[#f6f4ee]/95 backdrop-blur-md border-b border-stone-200/70 px-4 pt-safe pb-3">
       <div className="flex items-center justify-between">
         {/* Left: Back button or Title */}
         <div className="flex items-center gap-2">
