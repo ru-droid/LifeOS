@@ -10,3 +10,4 @@ coverage/
 # Local build output and AI Studio backup
 dev-dist/
 orbit-daily.zip
+supabase/.temp/
