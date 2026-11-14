@@ -1396,7 +1396,12 @@ export class LocalFirstStorage {
 
       const localTasks = this.getTasks();
       const syncedTasks = localTasks.map((t) => ({ ...t, user_id: user.id }));
-      await (supabase.from('tasks') as any).upsert(syncedTasks, { onConflict: 'id' });
+      const { error: tasksError } = await (supabase.from('tasks') as any).upsert(syncedTasks, { onConflict: 'id' });
+
+    if (tasksError) {
+      console.error('Supabase tasks sync failed:', tasksError);
+      throw tasksError;
+    }
 
       const localHabits = this.getHabits().map((h) => ({ ...h, user_id: user.id }));
       await (supabase.from('habits') as any).upsert(localHabits, { onConflict: 'id' });
